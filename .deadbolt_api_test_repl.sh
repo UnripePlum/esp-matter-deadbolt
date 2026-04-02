@@ -37,6 +37,8 @@ run_cmd() {
     /exit|exit|quit)   return 99 ;;
     /lock)             lock_door ;;
     /unlock)           unlock_door ;;
+    /exit_open)        exit_open ;;
+    /exit_open\ *)     eval "exit_open ${input#/exit_open }" ;;
     /state)            lock_state ;;
     /door_state)       door_state ;;
     /status)           full_status ;;

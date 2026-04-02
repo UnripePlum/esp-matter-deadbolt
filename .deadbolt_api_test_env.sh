@@ -104,6 +104,15 @@ unlock_door() {
     --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_cmd
 }
 
+exit_open() {
+  local secs="${1:-5}"
+  printf 'Exit Open %ss (node=%s endpoint=%s) ...\n' "$secs" "$NODE_ID" "$ENDPOINT_ID"
+  chip-tool doorlock unlock-with-timeout "$NODE_ID" "$ENDPOINT_ID" \
+    --Timeout "$secs" \
+    --timedInteractionTimeoutMs 1000 \
+    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_cmd
+}
+
 # ── Attribute Reads ─────────────────────────────────────────
 
 lock_state() {
@@ -276,6 +285,7 @@ api_help() {
 ── 도어락 제어 ────────────────────────────────────────────
   /lock                       잠금 (Matter Lock 명령)
   /unlock                     해제 (Matter Unlock 명령)
+  /exit_open [초]             퇴실 열림 (기본 5초, EXIT 릴레이 → 자동 잠금)
 
 ── 상태 읽기 ──────────────────────────────────────────────
   /state                      LockState (0=NotFullyLocked 1=Locked 2=Unlocked)

@@ -124,6 +124,19 @@ DlStatus emberAfPluginDoorLockSetSchedule(chip::EndpointId endpointId, uint8_t h
     return DlStatus::kFailure;
 }
 
+bool emberAfPluginDoorLockOnDoorUnlockWithTimeoutCommand(chip::EndpointId endpointId,
+    const chip::app::DataModel::Nullable<chip::FabricIndex> & fabricIdx,
+    const chip::app::DataModel::Nullable<chip::NodeId> & nodeId,
+    const chip::Optional<chip::ByteSpan> & pinCode,
+    uint16_t timeout,
+    OperationErrorEnum & err)
+{
+    ESP_LOGI(TAG, "Matter UnlockWithTimeout command: endpoint=%d, timeout=%ds", endpointId, timeout);
+    uint8_t duration = (timeout > 255) ? 255 : (uint8_t)timeout;
+    door_exit_open(duration);
+    return true;
+}
+
 void emberAfPluginDoorLockOnAutoRelock(chip::EndpointId endpointId)
 {
     ESP_LOGI(TAG, "Door Lock auto-relock: endpoint=%d", endpointId);
