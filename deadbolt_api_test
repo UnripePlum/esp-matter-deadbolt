@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPL_FILE="$PROJECT_DIR/.deadbolt_api_test_repl.sh"
+
+if [[ ! -f "$REPL_FILE" ]]; then
+  echo "Missing repl file: $REPL_FILE"
+  exit 1
+fi
+
+chmod +x "$REPL_FILE"
+
+NODE_ID="${1:-1}"
+ENDPOINT_ID="${2:-1}"
+
+osascript <<EOF
+tell application "Terminal"
+    activate
+    do script "bash '${REPL_FILE}' '${NODE_ID}' '${ENDPOINT_ID}'"
+end tell
+EOF

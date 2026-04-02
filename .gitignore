@@ -1,0 +1,23 @@
+# Build
+build/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Credentials
+.wifi_credentials
+
+# Test REPL hidden files
+.deadbolt_api_test_repl.sh
+.deadbolt_api_test_env.sh
+
+# OMC state
+.omc/

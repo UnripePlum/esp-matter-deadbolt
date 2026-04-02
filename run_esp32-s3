@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# 새 터미널 창을 열어서 flash + monitor 실행
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PORT="${PORT:-}"
+BAUD="${BAUD:-460800}"
+
+# 포트 자동 감지
+if [[ -z "$PORT" ]]; then
+    PORT=$(ls /dev/tty.usbserial* /dev/tty.usbmodem* /dev/cu.usbserial* 2>/dev/null | head -1 || true)
+    if [[ -z "$PORT" ]]; then
+        echo "[ERROR] USB 시리얼 포트를 찾을 수 없습니다. PORT 환경변수로 지정하세요."
+        exit 1
+    fi
+fi
+
+echo "=== 새 터미널에서 Flash + Monitor 실행 ==="
+echo "  Port: $PORT"
+echo "  Baud: $BAUD"
+
+CMD="cd ${PROJECT_DIR} && source \$HOME/.espressif/python_env/idf5.2_py3.9_env/bin/activate && source \$HOME/esp/esp-idf/export.sh 2>/dev/null && source \$HOME/esp/esp-matter/export.sh 2>/dev/null && idf.py -DIDF_TARGET=esp32s3 -p ${PORT} flash monitor"
+
+osascript <<EOF
+tell application "Terminal"
+    activate
+    do script "${CMD}"
+end tell
+EOF

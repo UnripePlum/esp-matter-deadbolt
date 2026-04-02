@@ -1,0 +1,28 @@
+set(PRIV_REQUIRES_LIST
+    nvs_flash
+    driver
+    esp_timer
+    esp_event
+    bt
+    esp_matter
+    chip
+    esp_adc
+    mbedtls
+    device
+    led_driver
+)
+
+set(SRC_FILES
+    app_main.cpp
+    door_controller.cpp
+    ble_server.cpp
+    comm_layer.cpp
+    hal_gpio.cpp
+    status_led.cpp
+)
+
+idf_component_register(
+    SRCS ${SRC_FILES}
+    PRIV_REQUIRES ${PRIV_REQUIRES_LIST}
+    INCLUDE_DIRS "."
+)
