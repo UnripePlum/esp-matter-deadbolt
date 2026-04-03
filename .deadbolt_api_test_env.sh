@@ -272,6 +272,105 @@ unpair() {
     --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_pair
 }
 
+# ── OTA Update ──────────────────────────────────────────────
+
+OTA_PROVIDER_PID=""
+OTA_PROVIDER_NODE=2
+MATTER_SDK="$HOME/esp/esp-matter/connectedhomeip/connectedhomeip"
+
+ota_update() {
+  local bin_path="${1:-$PROJECT_DIR/build/esp-matter-deadbolt.bin}"
+  local version="${2:-2}"
+
+  if [[ ! -f "$bin_path" ]]; then
+    printf '\033[31mERROR: 바이너리 없음: %s\033[0m\n' "$bin_path"
+    echo "사용법: ota_update [bin_path] [version_number]"
+    return 1
+  fi
+
+  local ota_path="${bin_path%.bin}.ota"
+  local ota_tool="$MATTER_SDK/src/app/ota_image_tool.py"
+  local provider_app="$MATTER_SDK/.environment/gn_out/chip-ota-provider-app"
+
+  # 1. OTA Provider 앱 확인
+  if [[ ! -x "$provider_app" ]]; then
+    printf '\033[33mOTA Provider 앱이 없습니다. 빌드 중...\033[0m\n'
+    (cd "$MATTER_SDK" && ./scripts/examples/gn_build_example.sh examples/ota-provider-app/linux out/ota-provider 2>&1 | tail -3)
+    provider_app="$MATTER_SDK/out/ota-provider/chip-ota-provider-app"
+    if [[ ! -x "$provider_app" ]]; then
+      printf '\033[31mERROR: OTA Provider 빌드 실패\033[0m\n'
+      return 1
+    fi
+  fi
+
+  # 2. OTA 이미지 생성
+  printf '1/4 OTA 이미지 생성 (v%s)...\n' "$version"
+  python3 "$ota_tool" create \
+    -v 0xFFF1 -p 0x8000 \
+    -vn "$version" -vs "${version}.0" \
+    -da sha256 \
+    "$bin_path" "$ota_path" 2>&1
+  if [[ $? -ne 0 ]]; then
+    printf '\033[31mERROR: OTA 이미지 생성 실패\033[0m\n'
+    return 1
+  fi
+  printf '\033[32mOTA 이미지: %s\033[0m\n' "$ota_path"
+
+  # 3. 기존 Provider 종료
+  ota_stop 2>/dev/null
+
+  # 4. OTA Provider 실행 (백그라운드)
+  printf '2/4 OTA Provider 시작...\n'
+  rm -f /tmp/ota-provider-kvs
+  "$provider_app" \
+    --filepath "$ota_path" \
+    --discriminator 3841 \
+    --KVS /tmp/ota-provider-kvs &>/tmp/ota-provider.log &
+  OTA_PROVIDER_PID=$!
+  sleep 2
+
+  if ! kill -0 "$OTA_PROVIDER_PID" 2>/dev/null; then
+    printf '\033[31mERROR: OTA Provider 시작 실패\033[0m\n'
+    cat /tmp/ota-provider.log | tail -5
+    return 1
+  fi
+  printf '\033[32mOTA Provider 실행 중 (PID=%s)\033[0m\n' "$OTA_PROVIDER_PID"
+
+  # 5. OTA Provider 커미셔닝
+  printf '3/4 OTA Provider 커미셔닝 (node=%s)...\n' "$OTA_PROVIDER_NODE"
+  chip-tool pairing onnetwork "$OTA_PROVIDER_NODE" 20202021 \
+    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_pair
+  if [[ $? -ne 0 ]]; then
+    printf '\033[31mERROR: OTA Provider 커미셔닝 실패\033[0m\n'
+    ota_stop
+    return 1
+  fi
+
+  # 6. ESP32에 OTA 트리거
+  printf '4/4 OTA 트리거 → node %s...\n' "$NODE_ID"
+  chip-tool otasoftwareupdaterequestor announce-otaprovider \
+    "$OTA_PROVIDER_NODE" 0 0 0 "$NODE_ID" 0 \
+    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_cmd
+
+  printf '\n\033[32m=== OTA 전송 시작 ===\033[0m\n'
+  printf 'ESP32 시리얼 로그에서 진행 상황을 확인하세요.\n'
+  printf '완료 후 /ota_stop 으로 Provider를 종료하세요.\n'
+}
+
+ota_stop() {
+  if [[ -n "$OTA_PROVIDER_PID" ]] && kill -0 "$OTA_PROVIDER_PID" 2>/dev/null; then
+    kill "$OTA_PROVIDER_PID" 2>/dev/null
+    wait "$OTA_PROVIDER_PID" 2>/dev/null
+    printf 'OTA Provider 종료 (PID=%s)\n' "$OTA_PROVIDER_PID"
+    OTA_PROVIDER_PID=""
+  else
+    printf 'OTA Provider가 실행 중이 아닙니다.\n'
+  fi
+  # Provider 커미셔닝 해제
+  chip-tool pairing unpair "$OTA_PROVIDER_NODE" \
+    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_pair
+}
+
 # ── Help ────────────────────────────────────────────────────
 
 api_help() {
@@ -287,6 +386,10 @@ api_help() {
 
 ── 테스트 ─────────────────────────────────────────────────
   /smoke                      스모크 테스트 (상태확인 → 잠금 → 확인 → 해제 → 확인)
+
+── OTA 업데이트 ───────────────────────────────────────────
+  /ota [bin] [ver]            원격 펌웨어 업데이트 (기본: build/esp-matter-deadbolt.bin, v2)
+  /ota_stop                   OTA Provider 종료
 
 ── 커미셔닝 ───────────────────────────────────────────────
   /pair [pin]                 온네트워크 커미셔닝 (기본 pin: 20202021)

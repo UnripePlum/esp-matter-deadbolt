@@ -40,6 +40,9 @@ run_cmd() {
     /exit_open)        exit_open ;;
     /exit_open\ *)     eval "exit_open ${input#/exit_open }" ;;
     /state|/status)    lock_state ;;
+    /ota)              ota_update ;;
+    /ota\ *)           eval "ota_update ${input#/ota }" ;;
+    /ota_stop)         ota_stop ;;
     /pair)             pair ;;
     /pair_wifi\ *)     eval "pair_wifi ${input#/pair_wifi }" ;;
     /pair_auto)        pair_auto ;;
