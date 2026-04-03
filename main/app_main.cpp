@@ -6,6 +6,7 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -170,16 +171,7 @@ static esp_err_t app_attribute_update_cb(
     if (cluster_id != DoorLock::Id) return ESP_OK;
 
     if (attribute_id == DoorLock::Attributes::LockState::Id) {
-        /*
-         * 릴레이 동작은 여기서 하지 않음.
-         * Matter Lock/Unlock 명령은 emberAfPluginDoorLockOnDoor{Lock,Unlock}Command 콜백이 처리.
-         *
-         * 이 콜백에서 릴레이를 조작하면 피드백 루프 발생:
-         *   report_result() → attribute::update() → 이 콜백 → deadbolt_set()
-         *   → 센서 불일치 시 실패 → report(NotFullyLocked) → 이 콜백 → 무한 반복
-         *
-         * LockState attribute는 상태 반영용이며, 제어 입력이 아님.
-         */
+        /* 릴레이 동작은 emberAf 콜백에서만 처리. 여기서 조작하면 피드백 루프 발생. */
         ESP_LOGI(TAG, "Matter LockState 속성 변경: %d (%s)",
                  val->val.u8,
                  val->val.u8 == 1 ? "Locked" :
@@ -262,18 +254,72 @@ static void setup_matter_door_lock(node_t *node)
  *  app_main
  * ═══════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════
+ *  BOOT 버튼 팩토리 리셋 (GPIO 0, 5초 길게 누르기)
+ * ═══════════════════════════════════════════════════════════ */
+
+#define BOOT_BUTTON_GPIO     0
+#define FACTORY_RESET_HOLD_MS 5000
+#define BOOT_POLL_MS         100
+
+static void factory_reset_task(void *arg)
+{
+    // BOOT 버튼 (GPIO 0): LOW = 눌림, HIGH = 안 눌림
+    gpio_config_t btn_cfg = {
+        .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&btn_cfg);
+
+    uint32_t hold_ms = 0;
+
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(BOOT_POLL_MS));
+
+        if (gpio_get_level((gpio_num_t)BOOT_BUTTON_GPIO) == 0) {
+            // 버튼 눌림
+            hold_ms += BOOT_POLL_MS;
+
+            if (hold_ms == 2000) {
+                ESP_LOGW(TAG, "BOOT 버튼 2초... 계속 누르면 팩토리 리셋");
+                status_led_notify_op_fail();  // 빨강 깜빡임 경고
+            }
+
+            if (hold_ms >= FACTORY_RESET_HOLD_MS) {
+                ESP_LOGE(TAG, "=== 팩토리 리셋 실행! ===");
+
+                // 1. Matter fabric 제거
+                chip::Server::GetInstance().ScheduleFactoryReset();
+
+                // ScheduleFactoryReset이 NVS 삭제 + 재부팅 처리
+                // 여기까지 오면 재부팅 대기
+                while (true) {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+            }
+        } else {
+            // 버튼 놓음
+            if (hold_ms > 0 && hold_ms < FACTORY_RESET_HOLD_MS) {
+                ESP_LOGI(TAG, "BOOT 버튼 놓음 (%"PRIu32"ms, 리셋 취소)", hold_ms);
+            }
+            hold_ms = 0;
+        }
+    }
+}
+
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "=== ESP32-S3 Matter Door Lock 시작 ===");
 
-    // 0. 최우선: 릴레이 GPIO 즉시 LOW 고정 (NC 배선 Fail-Safe)
-    //    gpio_init()보다 먼저 실행 — ADC/센서/LED 초기화 지연 방지
-    //    부트로더→app_main 사이 GPIO 부동(4V↔0V) → BC547 떨림 → 릴레이 채터링 방지
-    gpio_reset_pin((gpio_num_t)GPIO_RELAY_LOCK);
-    gpio_set_direction((gpio_num_t)GPIO_RELAY_LOCK, GPIO_MODE_OUTPUT);
-    gpio_set_level((gpio_num_t)GPIO_RELAY_LOCK, 0);  // LOW = 릴레이 OFF = NC 단락 = 12V 인가 = 잠금 유지
+    // 0. 최우선: 릴레이 GPIO 즉시 HIGH (Low Trigger → 릴레이 OFF → 잠금)
+    gpio_reset_pin((gpio_num_t)GPIO_RELAY_PIN);
+    gpio_set_direction((gpio_num_t)GPIO_RELAY_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)GPIO_RELAY_PIN, 0);  // LOW = 잠금
 
-    // 0-1. 나머지 GPIO 전체 초기화 (ADC, 센서, LED, EXIT 릴레이, 안전 타이머)
+    // 0-1. GPIO 전체 초기화
     gpio_init();
 
     // 1. NVS 초기화
@@ -317,10 +363,11 @@ extern "C" void app_main(void)
     status_led_set_commissioning(true);  // 초기: 커미셔닝 대기 (파랑 빠른 깜빡임)
     status_led_set_system_ready(true);
 
+    // 9. BOOT 버튼 팩토리 리셋 태스크
+    xTaskCreate(factory_reset_task, "factory_rst", 4096, NULL, 3, NULL);
+
     ESP_LOGI(TAG, "=== Matter Door Lock 시작 완료 ===");
     ESP_LOGI(TAG, "  Primary:  WiFi over Matter (Door Lock Cluster)");
     ESP_LOGI(TAG, "  Fallback: BLE GATT Server (AES-128-GCM)");
-    ESP_LOGI(TAG, "  릴레이:   #1=GPIO%d(전원), #2=GPIO%d(EXIT)", GPIO_RELAY_LOCK, GPIO_RELAY_EXIT);
-    ESP_LOGI(TAG, "  검증:     문상태 센서 + 최대 %d회 재시도", MAX_RETRY_COUNT);
-    ESP_LOGI(TAG, "  폴링:     %dms 주기, 디바운스 %d회", POLL_INTERVAL_MS, DEBOUNCE_COUNT);
+    ESP_LOGI(TAG, "  릴레이:   GPIO%d (CW-020, LOW=잠금 HIGH=해제)", GPIO_RELAY_PIN);
 }

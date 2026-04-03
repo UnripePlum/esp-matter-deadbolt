@@ -39,9 +39,7 @@ run_cmd() {
     /unlock)           unlock_door ;;
     /exit_open)        exit_open ;;
     /exit_open\ *)     eval "exit_open ${input#/exit_open }" ;;
-    /state)            lock_state ;;
-    /door_state)       door_state ;;
-    /status)           full_status ;;
+    /state|/status)    lock_state ;;
     /pair)             pair ;;
     /pair_wifi\ *)     eval "pair_wifi ${input#/pair_wifi }" ;;
     /pair_auto)        pair_auto ;;

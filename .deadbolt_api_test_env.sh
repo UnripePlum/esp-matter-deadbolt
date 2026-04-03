@@ -179,12 +179,6 @@ actuator_enabled() {
 full_status() {
   echo "=== Lock State ==="
   lock_state
-  echo "=== Door State ==="
-  door_state
-  echo "=== Lock Type ==="
-  lock_type
-  echo "=== Actuator Enabled ==="
-  actuator_enabled
 }
 
 smoke() {
@@ -282,15 +276,14 @@ unpair() {
 
 api_help() {
   cat <<'HELP'
-── 도어락 제어 ────────────────────────────────────────────
-  /lock                       잠금 (Matter Lock 명령)
-  /unlock                     해제 (Matter Unlock 명령)
-  /exit_open [초]             퇴실 열림 (기본 5초, EXIT 릴레이 → 자동 잠금)
+── 도어락 제어 (GPIO4: LOW=잠금, HIGH=해제) ───────────────
+  /lock                       잠금 (GPIO LOW → 릴레이 OFF)
+  /unlock                     해제 (GPIO HIGH → 릴레이 ON)
+  /exit_open [초]             퇴실 열림 (기본 5초, 자동 잠금)
 
 ── 상태 읽기 ──────────────────────────────────────────────
-  /state                      LockState (0=NotFullyLocked 1=Locked 2=Unlocked)
-  /door_state                 DoorState (0=Open 1=Closed 2=Jammed 3=ForcedOpen)
-  /status                     전체 상태 조회 (LockState + DoorState + LockType + Actuator)
+  /state                      LockState (1=Locked 2=Unlocked)
+  /status                     전체 상태 조회
 
 ── 테스트 ─────────────────────────────────────────────────
   /smoke                      스모크 테스트 (상태확인 → 잠금 → 확인 → 해제 → 확인)
