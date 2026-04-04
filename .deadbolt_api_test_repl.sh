@@ -48,6 +48,7 @@ run_cmd() {
     /pair_auto)        pair_auto ;;
     /unpair)           unpair ;;
     /smoke)            smoke ;;
+    /factory_reset)    factory_reset ;;
     *)
       if [[ "$input" == /* ]]; then
         local raw="${input#/}"

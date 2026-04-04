@@ -1,0 +1,313 @@
+# ESP32-S3 Matter 도어락 — API 명세서 (Mobile App)
+
+**버전:** 3.0.0
+**최종 수정:** 2026-04-04
+**대상:** 모바일 앱 (iOS/Android) 및 PC 관리 소프트웨어 개발자
+
+---
+
+## 개요
+
+도어락은 **Matter 프로토콜(WiFi)**을 통해 제어됩니다.
+
+| 클러스터 | ID | 용도 |
+|----------|-----|------|
+| **Door Lock** (표준) | `0x0101` | 잠금/해제 |
+| **Custom Control** (커스텀) | `0x131BFC00` | 퇴실(EXIT_OPEN), 팩토리 리셋 |
+
+### 통신 구조
+
+```
+모바일 앱 / PC 관리 SW
+       │
+       │  Matter (WiFi)
+       ▼
+  ESP32-S3 Door Lock
+  ├── Door Lock Cluster (0x0101)    — 잠금/해제
+  └── Custom Control (0x131BFC00)   — 퇴실, 팩토리 리셋
+```
+
+### BLE에 대하여
+
+BLE는 **Matter 커미셔닝(초기 기기 등록) 전용**입니다. CHIP SDK가 BLE 스택을 완전히 독점하므로 커스텀 BLE 서비스는 사용할 수 없습니다. WiFi 연결 실패 시 기기가 자동으로 커미셔닝 윈도우를 열어 BLE를 통해 새 WiFi 크레덴셜을 수신합니다.
+
+---
+
+## 1. Door Lock Cluster (0x0101) — 잠금/해제
+
+표준 Matter Door Lock Cluster.
+
+### 1-1. LockDoor (잠금)
+
+**Request**
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| endpointId | uint16 | Y | 도어락 엔드포인트 (기본: 1) |
+| timedInteractionTimeoutMs | uint16 | Y | 권장: 1000ms |
+
+**Response**
+
+| 필드 | 타입 | 값 |
+|------|------|-----|
+| status | StatusCode | `0x00` = 성공 |
+
+**동작:** GPIO 4 → LOW → 릴레이 OFF → 잠금
+
+```bash
+chip-tool doorlock lock-door <node_id> <endpoint_id> --timedInteractionTimeoutMs 1000
+```
+
+---
+
+### 1-2. UnlockDoor (해제)
+
+**Request**
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| endpointId | uint16 | Y | 도어락 엔드포인트 (기본: 1) |
+| timedInteractionTimeoutMs | uint16 | Y | 권장: 1000ms |
+
+**Response**
+
+| 필드 | 타입 | 값 |
+|------|------|-----|
+| status | StatusCode | `0x00` = 성공 |
+
+**동작:** GPIO 4 → HIGH → 릴레이 ON → 해제 (지속)
+
+```bash
+chip-tool doorlock unlock-door <node_id> <endpoint_id> --timedInteractionTimeoutMs 1000
+```
+
+---
+
+### 1-3. Read: LockState (상태 조회)
+
+**Response**
+
+| value | 타입 | 의미 |
+|-------|------|------|
+| `0` | enum8 | NotFullyLocked (동작 실패) |
+| `1` | enum8 | **Locked** (잠금) |
+| `2` | enum8 | **Unlocked** (해제) |
+
+```bash
+chip-tool doorlock read lock-state <node_id> <endpoint_id>
+```
+
+---
+
+### 1-4. Subscribe: LockState (실시간 상태 감지)
+
+```bash
+chip-tool doorlock subscribe lock-state <min-interval> <max-interval> <node_id> <endpoint_id>
+```
+
+앱에서 Subscribe를 설정하면 잠금 상태 변경 시 자동으로 알림을 받습니다.
+
+---
+
+### 1-5. Read: LockType
+
+| value | 의미 |
+|-------|------|
+| `0` | DeadBolt (고정값) |
+
+---
+
+### 1-6. 미지원 기능
+
+| 기능 | 응답 |
+|------|------|
+| User 관리 (Get/Set) | `false` |
+| Credential 관리 (Get/Set) | `false` |
+| Schedule 관리 | `DlStatus::kFailure` |
+| PIN 코드 인증 | 무시 (항상 성공) |
+| UnlockWithTimeout | 미등록 (커스텀 클러스터 exit_open 사용) |
+
+---
+
+## 2. Custom Control Cluster (0x131BFC00) — 퇴실/팩토리 리셋
+
+커스텀 클러스터. Attribute Write로 동작을 트리거합니다.
+
+| Attribute | ID | 타입 | 용도 |
+|-----------|----|------|------|
+| factory_reset | `0x00000000` | uint16 | `0xDEAD`(57005) 쓰기 → 팩토리 리셋 |
+| exit_open | `0x00000001` | uint8 | duration(3~30) 쓰기 → 퇴실 열림 |
+
+---
+
+### 2-1. EXIT_OPEN (퇴실)
+
+도어를 일시적으로 해제한 후 자동 잠금합니다.
+
+**Request — Attribute Write**
+
+| 필드 | 값 |
+|------|-----|
+| cluster_id | `0x131BFC00` |
+| attribute_id | `0x00000001` |
+| value | duration (uint8, 3~30초. 범위 밖이면 5초로 보정) |
+
+**동작:**
+1. GPIO HIGH → 해제
+2. duration초 대기
+3. GPIO LOW → 자동 잠금
+
+```bash
+# 5초 퇴실
+chip-tool any write-by-id 0x131BFC00 1 5 <node_id> <endpoint_id>
+
+# 10초 퇴실
+chip-tool any write-by-id 0x131BFC00 1 10 <node_id> <endpoint_id>
+```
+
+---
+
+### 2-2. FACTORY_RESET (팩토리 리셋)
+
+NVS 전체 삭제 + 재부팅. 재커미셔닝이 필요합니다.
+
+**Request — Attribute Write**
+
+| 필드 | 값 |
+|------|-----|
+| cluster_id | `0x131BFC00` |
+| attribute_id | `0x00000000` |
+| value | `57005` (0xDEAD, uint16) |
+
+**동작:**
+1. `ScheduleFactoryReset()` 호출
+2. NVS 전체 삭제 (WiFi, Matter fabric, 모든 설정)
+3. 자동 재부팅
+4. 커미셔닝 대기 상태 (파란 LED 깜빡임)
+
+```bash
+chip-tool any write-by-id 0x131BFC00 0 57005 <node_id> <endpoint_id>
+```
+
+> 0xDEAD 이외의 값은 무시됩니다 (안전장치).
+
+---
+
+## 3. 커미셔닝 (기기 등록)
+
+### 3-1. BLE-WiFi 커미셔닝 (최초 등록)
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| Setup PIN | `20202021` | 페어링 PIN |
+| Discriminator | `3840` | 기기 식별자 |
+
+```bash
+chip-tool pairing ble-wifi <node_id> <ssid> <password> 20202021 3840
+```
+
+### 3-2. 온네트워크 커미셔닝 (WiFi 이미 연결됨)
+
+```bash
+chip-tool pairing onnetwork <node_id> 20202021
+```
+
+### 3-3. 커미셔닝 해제
+
+```bash
+chip-tool pairing unpair <node_id>
+```
+
+### 3-4. 수동 팩토리 리셋
+
+BOOT 버튼(GPIO 0)을 **5초 길게 누르면** 팩토리 리셋됩니다.
+
+---
+
+## 4. WiFi 실패 시 복구
+
+WiFi 연결이 장시간 실패하면 기기가 자동으로 커미셔닝 윈도우를 다시 엽니다.
+
+```
+WiFi 실패 지속 → 커미셔닝 윈도우 오픈 → BLE 광고 재개
+→ 모바일 앱에서 ble-wifi pairing으로 새 WiFi 크레덴셜 전달
+→ WiFi 재연결 → 정상 운영
+```
+
+또는 원격으로 `factory_reset`(섹션 2-2)을 보내 완전 초기화할 수 있습니다.
+
+---
+
+## 5. 모바일 앱 통합 가이드
+
+### 5-1. 연결 전략
+
+```
+1. Matter 컨트롤러로 기기 검색 (mDNS)
+   ├─ 발견 → Matter API로 제어
+   └─ 미발견 → BLE 스캔
+2. BLE 커미셔닝 광고 발견 시
+   → BLE-WiFi 페어링 진행
+```
+
+### 5-2. 일반 사용 시나리오
+
+```
+앱 시작 → Read LockState → 현재 상태 표시
+사용자 "잠금" 터치 → LockDoor 전송 → 결과 표시
+사용자 "해제" 터치 → UnlockDoor 전송 → 결과 표시
+사용자 "퇴실" 터치 → exit_open Write (5초) → "5초 후 자동 잠금" 표시
+```
+
+### 5-3. 관리 시나리오
+
+```
+관리자 "공장 초기화" → factory_reset Write (0xDEAD) → "재부팅 중" 표시
+관리자 "WiFi 변경" → factory_reset 또는 재커미셔닝
+```
+
+### 5-4. 에러 처리
+
+| 상황 | 처리 |
+|------|------|
+| Matter 명령 타임아웃 | WiFi 확인 → 재시도 |
+| LockState = 0 | 동작 실패 → 수동 확인 요청 |
+| 기기 mDNS 미발견 | 전원 확인 → BLE 스캔으로 재커미셔닝 |
+| write-by-id 실패 | 커미셔닝 상태 확인 |
+
+---
+
+## 6. 하드웨어 매핑
+
+| GPIO | 기능 | 동작 |
+|------|------|------|
+| 0 | BOOT 버튼 | 5초 → 팩토리 리셋 |
+| 4 | CW-020 릴레이 IN | LOW=잠금, HIGH=해제 |
+| 48 | WS2812 Status LED | 상태 표시 |
+
+### Status LED
+
+| 상태 | 색상 | 패턴 |
+|------|------|------|
+| 부팅 중 | 파랑 | 느린 깜빡임 |
+| 커미셔닝 대기 | 파랑 | 빠른 깜빡임 |
+| 잠금 | 주황 | 고정 |
+| 해제 | 초록 | 고정 |
+| 동작 진행 | 주황/초록 | 빠른 깜빡임 (2초) |
+| 동작 실패 | 빨강 | 빠른 깜빡임 (2초) |
+
+---
+
+## 7. 클러스터 요약
+
+```
+Endpoint 1
+├── Door Lock Cluster (0x0101)
+│   ├── Command: LockDoor          → GPIO LOW (잠금)
+│   ├── Command: UnlockDoor        → GPIO HIGH (해제)
+│   └── Attribute: LockState       → 0/1/2 (Read/Subscribe)
+│
+└── Custom Control (0x131BFC00)
+    ├── Attribute 0: factory_reset  → uint16, write 57005(0xDEAD) = 리셋
+    └── Attribute 1: exit_open      → uint8, write 3~30 = 퇴실 (초)
+```

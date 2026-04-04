@@ -15,7 +15,6 @@ set(PRIV_REQUIRES_LIST
 set(SRC_FILES
     app_main.cpp
     door_controller.cpp
-    ble_server.cpp
     comm_layer.cpp
     hal_gpio.cpp
     status_led.cpp

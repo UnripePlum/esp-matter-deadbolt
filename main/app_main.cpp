@@ -1,6 +1,5 @@
 #include "hal_gpio.h"
 #include "door_controller.h"
-#include "ble_server.h"
 #include "comm_layer.h"
 #include "status_led.h"
 
@@ -24,6 +23,12 @@ using namespace chip::app::Clusters::DoorLock;
 static const char *TAG = "app_main";
 
 /* door_control_task는 더 이상 사용하지 않음 — door_queue_command() 사용 */
+
+/* ── 커스텀 클러스터 ID ── */
+static const uint32_t CUSTOM_CLUSTER_CONTROL       = 0x131BFC00;
+static const uint32_t CUSTOM_ATTR_FACTORY_RESET    = 0x00000000;  // uint16, write 0xDEAD → 팩토리 리셋
+static const uint32_t CUSTOM_ATTR_EXIT_OPEN        = 0x00000001;  // uint8, write duration(3~30) → 퇴실
+static const uint16_t FACTORY_RESET_MAGIC          = 0xDEAD;
 
 /* ═══════════════════════════════════════════════════════════
  *  CHIP Door Lock Cluster Required Callbacks
@@ -168,6 +173,19 @@ static esp_err_t app_attribute_update_cb(
     uint32_t attribute_id, esp_matter_attr_val_t *val, void *priv_data)
 {
     if (type != PRE_UPDATE) return ESP_OK;
+
+    /* 커스텀 클러스터 처리 */
+    if (cluster_id == CUSTOM_CLUSTER_CONTROL) {
+        if (attribute_id == CUSTOM_ATTR_FACTORY_RESET && val->val.u16 == FACTORY_RESET_MAGIC) {
+            ESP_LOGE(TAG, "=== 원격 팩토리 리셋 요청 (0xDEAD) ===");
+            chip::Server::GetInstance().ScheduleFactoryReset();
+        } else if (attribute_id == CUSTOM_ATTR_EXIT_OPEN && val->val.u8 > 0) {
+            ESP_LOGI(TAG, "퇴실 요청: %d초", val->val.u8);
+            door_exit_open(val->val.u8);
+        }
+        return ESP_OK;
+    }
+
     if (cluster_id != DoorLock::Id) return ESP_OK;
 
     if (attribute_id == DoorLock::Attributes::LockState::Id) {
@@ -222,6 +240,9 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
         case chip::DeviceLayer::DeviceEventType::kCommissioningWindowOpened:
         case chip::DeviceLayer::DeviceEventType::kCommissioningWindowClosed:
         case chip::DeviceLayer::DeviceEventType::kFabricCommitted:
+            refresh_commissioning_led();
+            break;
+
         case chip::DeviceLayer::DeviceEventType::kServerReady:
             refresh_commissioning_led();
             break;
@@ -235,6 +256,29 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
  *  Matter Door Lock Endpoint 설정
  * ═══════════════════════════════════════════════════════════ */
 
+static void add_custom_control_cluster(endpoint_t *ep)
+{
+    cluster_t *cluster = cluster::create(ep, CUSTOM_CLUSTER_CONTROL,
+                                          CLUSTER_FLAG_SERVER);
+    if (!cluster) {
+        ESP_LOGE(TAG, "커스텀 클러스터 생성 실패");
+        return;
+    }
+
+    /* Factory Reset: uint16, write 0xDEAD → 팩토리 리셋 */
+    esp_matter_attr_val_t reset_val = esp_matter_uint16(0);
+    attribute::create(cluster, CUSTOM_ATTR_FACTORY_RESET,
+                      ATTRIBUTE_FLAG_WRITABLE, reset_val);
+
+    /* Exit Open: uint8, write duration(3~30) → 퇴실 열림 후 자동 잠금 */
+    esp_matter_attr_val_t exit_val = esp_matter_uint8(0);
+    attribute::create(cluster, CUSTOM_ATTR_EXIT_OPEN,
+                      ATTRIBUTE_FLAG_WRITABLE, exit_val);
+
+    ESP_LOGI(TAG, "커스텀 클러스터 등록 (0x%08lX): factory_reset(attr 0), exit_open(attr 1)",
+             (unsigned long)CUSTOM_CLUSTER_CONTROL);
+}
+
 static void setup_matter_door_lock(node_t *node)
 {
     endpoint::door_lock::config_t lock_config;
@@ -246,6 +290,10 @@ static void setup_matter_door_lock(node_t *node)
                                                   ENDPOINT_FLAG_NONE, NULL);
     uint16_t endpoint_id = endpoint::get_id(ep);
     comm_set_endpoint_id(endpoint_id);
+
+
+    /* 커스텀 제어 클러스터 추가 (factory_reset + exit_open) */
+    add_custom_control_cluster(ep);
 
     ESP_LOGI(TAG, "Door Lock endpoint 생성: ID=%d", endpoint_id);
 }
@@ -330,8 +378,7 @@ extern "C" void app_main(void)
         nvs_flash_init();
     }
 
-    // 2. BLE 암호화 키 로드 (NVS만 사용, NimBLE 불필요)
-    ble_crypto_init();
+    // 2. (BLE는 Matter 커미셔닝 전용 — CHIP SDK가 관리)
 
     // 3. Matter 노드 생성
     node::config_t node_config;
@@ -354,8 +401,7 @@ extern "C" void app_main(void)
         return;
     }
 
-    // 7. BLE GATT 서버 등록 (Matter가 NimBLE 초기화한 후)
-    ble_gatt_server_init();
+    // 7. (BLE GATT 제거 — Matter 커미셔닝 전용)
 
     // 8. Status LED 초기화 + 시스템 준비 완료
     status_led_init();

@@ -107,9 +107,7 @@ unlock_door() {
 exit_open() {
   local secs="${1:-5}"
   printf 'Exit Open %ss (node=%s endpoint=%s) ...\n' "$secs" "$NODE_ID" "$ENDPOINT_ID"
-  chip-tool doorlock unlock-with-timeout "$NODE_ID" "$ENDPOINT_ID" \
-    --Timeout "$secs" \
-    --timedInteractionTimeoutMs 1000 \
+  chip-tool any write-by-id 0x131BFC00 1 "$secs" "$NODE_ID" "$ENDPOINT_ID" \
     --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_cmd
 }
 
@@ -357,6 +355,20 @@ ota_update() {
   printf '완료 후 /ota_stop 으로 Provider를 종료하세요.\n'
 }
 
+factory_reset() {
+  printf '\033[31m=== 원격 팩토리 리셋 ===\033[0m\n'
+  printf 'NVS 전체 삭제 + 재부팅됩니다. 계속하시겠습니까? (y/N): '
+  read -r confirm
+  if [[ ! "$confirm" =~ ^[yY] ]]; then
+    printf '취소\n'
+    return 0
+  fi
+  printf 'Factory Reset 전송...\n'
+  chip-tool any write-by-id 0x131BFC00 0 57005 "$NODE_ID" "$ENDPOINT_ID" \
+    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_cmd
+  printf '기기가 재부팅됩니다. 재커미셔닝(/pair_auto) 필요.\n'
+}
+
 ota_stop() {
   if [[ -n "$OTA_PROVIDER_PID" ]] && kill -0 "$OTA_PROVIDER_PID" 2>/dev/null; then
     kill "$OTA_PROVIDER_PID" 2>/dev/null
@@ -375,17 +387,20 @@ ota_stop() {
 
 api_help() {
   cat <<'HELP'
-── 도어락 제어 (GPIO4: LOW=잠금, HIGH=해제) ───────────────
+── Matter 제어 (GPIO4: LOW=잠금, HIGH=해제) ───────────────
   /lock                       잠금 (GPIO LOW → 릴레이 OFF)
   /unlock                     해제 (GPIO HIGH → 릴레이 ON)
   /exit_open [초]             퇴실 열림 (기본 5초, 자동 잠금)
 
-── 상태 읽기 ──────────────────────────────────────────────
+── Matter 상태 ────────────────────────────────────────────
   /state                      LockState (1=Locked 2=Unlocked)
   /status                     전체 상태 조회
 
 ── 테스트 ─────────────────────────────────────────────────
   /smoke                      스모크 테스트 (상태확인 → 잠금 → 확인 → 해제 → 확인)
+
+── 관리 ───────────────────────────────────────────────────
+  /factory_reset                원격 팩토리 리셋 (NVS 삭제 + 재부팅)
 
 ── OTA 업데이트 ───────────────────────────────────────────
   /ota [bin] [ver]            원격 펌웨어 업데이트 (기본: build/esp-matter-deadbolt.bin, v2)
@@ -405,5 +420,6 @@ api_help() {
   /help                       이 도움말
   /node                       현재 node/endpoint 확인
   /exit                       종료
+
 HELP
 }

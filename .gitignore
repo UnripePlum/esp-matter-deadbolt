@@ -15,8 +15,5 @@ sdkconfig.old
 # Credentials
 .wifi_credentials
 
-# Test REPL credentials (sensitive)
-.wifi_credentials
-
 # OMC state
 .omc/
