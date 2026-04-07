@@ -45,7 +45,7 @@ static uint16_t s_door_endpoint_id = 1;
 
 static void ota_task(void *arg);  // forward declaration
 
-#define FIRMWARE_VERSION            "v1.1.1"
+#define FIRMWARE_VERSION            "v1.1.2"
 #define GITHUB_API_LATEST_URL       "https://api.github.com/repos/UnripePlum/esp-matter-deadbolt/releases/latest"
 #define AUTO_OTA_BOOT_DELAY_MS      (60UL * 1000UL)          // 부팅 후 첫 확인 전 대기
 #define AUTO_OTA_CHECK_INTERVAL_MS  (1UL * 3600UL * 1000UL)  // 1시간마다 재확인
