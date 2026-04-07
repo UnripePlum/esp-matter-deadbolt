@@ -137,6 +137,7 @@ chip-tool doorlock subscribe lock-state <min-interval> <max-interval> <node_id> 
 |-----------|----|------|------|
 | factory_reset | `0x00000000` | uint16 | `0xDEAD`(57005) 쓰기 → 팩토리 리셋 |
 | exit_open | `0x00000001` | uint8 | duration(3~30) 쓰기 → 퇴실 열림 |
+| ota_trigger | `0x00000002` | uint8 | `1` 쓰기 → HTTPS OTA 시작 |
 
 ---
 
@@ -167,7 +168,34 @@ chip-tool any write-by-id 0x131BFC00 1 10 <node_id> <endpoint_id>
 
 ---
 
-### 2-2. FACTORY_RESET (팩토리 리셋)
+### 2-2. OTA_TRIGGER (무선 펌웨어 업데이트)
+
+최신 릴리즈 펌웨어를 GitHub Releases에서 직접 다운로드하여 업데이트합니다.
+
+**Request — Attribute Write**
+
+| 필드 | 값 |
+|------|-----|
+| cluster_id | `0x131BFC00` |
+| attribute_id | `0x00000002` |
+| value | `1` (uint8) |
+
+**동작:**
+1. HTTPS로 GitHub Releases latest 바이너리 다운로드
+2. OTA 파티션에 기록
+3. 완료 시 자동 재부팅
+
+> [!NOTE]
+> URL은 펌웨어에 하드코딩됨 — 버전 업 시 별도 설정 불필요.
+> OTA 진행 중 빨강 LED 점멸로 상태 표시.
+
+```bash
+chip-tool any write-by-id 0x131BFC00 2 1 <node_id> <endpoint_id>
+```
+
+---
+
+### 2-3. FACTORY_RESET (팩토리 리셋)
 
 NVS 전체 삭제 + 재부팅. 재커미셔닝이 필요합니다.
 
@@ -309,5 +337,6 @@ Endpoint 1
 │
 └── Custom Control (0x131BFC00)
     ├── Attribute 0: factory_reset  → uint16, write 57005(0xDEAD) = 리셋
-    └── Attribute 1: exit_open      → uint8, write 3~30 = 퇴실 (초)
+    ├── Attribute 1: exit_open      → uint8, write 3~30 = 퇴실 (초)
+    └── Attribute 2: ota_trigger    → uint8, write 1 = OTA 시작
 ```

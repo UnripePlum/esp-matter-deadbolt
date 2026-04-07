@@ -130,6 +130,9 @@ chip-tool doorlock read lock-state <node_id> 1
 # 퇴실 (5초 후 자동 잠금)
 chip-tool any write-by-id 0x131BFC00 1 5 <node_id> 1
 
+# OTA (GitHub Releases latest 자동 다운로드)
+chip-tool any write-by-id 0x131BFC00 2 1 <node_id> 1
+
 # 팩토리 리셋
 chip-tool any write-by-id 0x131BFC00 0 57005 <node_id> 1
 ```
@@ -150,6 +153,7 @@ chip-tool any write-by-id 0x131BFC00 0 57005 <node_id> 1
 |-----------|----|------|------|
 | `factory_reset` | `0x00000000` | uint16 | `57005`(0xDEAD) 쓰기 → 팩토리 리셋 |
 | `exit_open` | `0x00000001` | uint8 | duration(3~30) 쓰기 → 퇴실 열림 후 자동 잠금 |
+| `ota_trigger` | `0x00000002` | uint8 | `1` 쓰기 → GitHub Releases latest OTA |
 
 전체 API 명세: [`docs/API_SPECIFICATION.md`](docs/API_SPECIFICATION.md)
 

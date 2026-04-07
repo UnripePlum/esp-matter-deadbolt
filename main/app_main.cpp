@@ -7,7 +7,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
-#include "nvs.h"
 #include "esp_https_ota.h"
 #include "esp_crt_bundle.h"
 #include "freertos/FreeRTOS.h"
@@ -31,51 +30,24 @@ static const char *TAG = "app_main";
 static const uint32_t CUSTOM_CLUSTER_CONTROL       = 0x131BFC00;
 static const uint32_t CUSTOM_ATTR_FACTORY_RESET    = 0x00000000;  // uint16, write 0xDEAD → 팩토리 리셋
 static const uint32_t CUSTOM_ATTR_EXIT_OPEN        = 0x00000001;  // uint8, write duration(3~30) → 퇴실
-static const uint32_t CUSTOM_ATTR_OTA_URL          = 0x00000002;  // char string, write URL → NVS 저장
-static const uint32_t CUSTOM_ATTR_OTA_TRIGGER      = 0x00000003;  // uint8, write 1 → HTTPS OTA 시작
+static const uint32_t CUSTOM_ATTR_OTA_TRIGGER      = 0x00000002;  // uint8, write 1 → HTTPS OTA 시작
 static const uint16_t FACTORY_RESET_MAGIC          = 0xDEAD;
 
-#define OTA_NVS_NAMESPACE  "ota_cfg"
-#define OTA_NVS_URL_KEY    "url"
-#define OTA_URL_MAX_LEN    256
-
-static void ota_url_save(const char *url)
-{
-    nvs_handle_t handle;
-    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK) {
-        nvs_set_str(handle, OTA_NVS_URL_KEY, url);
-        nvs_commit(handle);
-        nvs_close(handle);
-        ESP_LOGI(TAG, "OTA URL 저장: %s", url);
-    }
-}
-
-static bool ota_url_load(char *buf, size_t len)
-{
-    nvs_handle_t handle;
-    if (nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) return false;
-    esp_err_t err = nvs_get_str(handle, OTA_NVS_URL_KEY, buf, &len);
-    nvs_close(handle);
-    return err == ESP_OK;
-}
+// GitHub Releases latest 고정 URL — 버전 업 시 URL 변경 불필요
+#define OTA_FIRMWARE_URL \
+    "https://github.com/UnripePlum/esp-matter-deadbolt/releases/latest/download/esp-matter-deadbolt.bin"
 
 static void ota_task(void *arg)
 {
-    char url[OTA_URL_MAX_LEN] = {};
-    if (!ota_url_load(url, sizeof(url)) || url[0] == '\0') {
-        ESP_LOGE(TAG, "OTA URL 없음. chip-tool로 URL을 먼저 설정하세요.");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    ESP_LOGI(TAG, "=== HTTPS OTA 시작: %s ===", url);
-    status_led_notify_op_fail();  // 노란 점멸로 OTA 진행 중 표시
+    ESP_LOGI(TAG, "=== HTTPS OTA 시작: %s ===", OTA_FIRMWARE_URL);
+    status_led_notify_op_fail();  // 빨강 점멸로 OTA 진행 중 표시
 
     esp_http_client_config_t http_cfg = {
-        .url = url,
+        .url = OTA_FIRMWARE_URL,
+        .timeout_ms = 60000,
+        .max_redirection_count = 10,  // GitHub 리다이렉트 대응
         .crt_bundle_attach = esp_crt_bundle_attach,
         .keep_alive_enable = true,
-        .timeout_ms = 30000,
     };
     esp_https_ota_config_t ota_cfg = {
         .http_config = &http_cfg,
@@ -243,11 +215,6 @@ static esp_err_t app_attribute_update_cb(
         } else if (attribute_id == CUSTOM_ATTR_EXIT_OPEN && val->val.u8 > 0) {
             ESP_LOGI(TAG, "퇴실 요청: %d초", val->val.u8);
             door_exit_open(val->val.u8);
-        } else if (attribute_id == CUSTOM_ATTR_OTA_URL && val->val.a.b != nullptr && val->val.a.s > 0) {
-            char url[OTA_URL_MAX_LEN] = {};
-            size_t copy_len = (val->val.a.s < OTA_URL_MAX_LEN - 1) ? val->val.a.s : OTA_URL_MAX_LEN - 1;
-            memcpy(url, val->val.a.b, copy_len);
-            ota_url_save(url);
         } else if (attribute_id == CUSTOM_ATTR_OTA_TRIGGER && val->val.u8 == 1) {
             ESP_LOGI(TAG, "OTA 트리거 수신");
             xTaskCreate(ota_task, "ota_task", 8192, nullptr, 5, nullptr);
@@ -353,18 +320,12 @@ static void add_custom_control_cluster(endpoint_t *ep)
     attribute::create(cluster, CUSTOM_ATTR_EXIT_OPEN,
                       ATTRIBUTE_FLAG_WRITABLE, exit_val);
 
-    /* OTA URL: char string, write URL → NVS 저장 */
-    static char s_ota_url_attr[OTA_URL_MAX_LEN] = "";
-    esp_matter_attr_val_t url_val = esp_matter_char_str(s_ota_url_attr, 0);
-    attribute::create(cluster, CUSTOM_ATTR_OTA_URL,
-                      ATTRIBUTE_FLAG_WRITABLE, url_val);
-
     /* OTA Trigger: uint8, write 1 → HTTPS OTA 시작 */
     esp_matter_attr_val_t trigger_val = esp_matter_uint8(0);
     attribute::create(cluster, CUSTOM_ATTR_OTA_TRIGGER,
                       ATTRIBUTE_FLAG_WRITABLE, trigger_val);
 
-    ESP_LOGI(TAG, "커스텀 클러스터 등록 (0x%08lX): factory_reset(0), exit_open(1), ota_url(2), ota_trigger(3)",
+    ESP_LOGI(TAG, "커스텀 클러스터 등록 (0x%08lX): factory_reset(0), exit_open(1), ota_trigger(2)",
              (unsigned long)CUSTOM_CLUSTER_CONTROL);
 }
 
