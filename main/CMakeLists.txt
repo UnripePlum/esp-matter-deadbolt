@@ -10,6 +10,8 @@ set(PRIV_REQUIRES_LIST
     mbedtls
     device
     led_driver
+    esp_https_ota
+    app_update
 )
 
 set(SRC_FILES
