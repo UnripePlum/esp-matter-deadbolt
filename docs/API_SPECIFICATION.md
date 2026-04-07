@@ -1,6 +1,6 @@
 # ESP32-S3 Matter 도어락 — API 명세서 (Mobile App)
 
-**버전:** 4.0.0
+**버전:** 4.1.0
 **최종 수정:** 2026-04-07
 **대상:** 모바일 앱 (iOS/Android) 및 PC 관리 소프트웨어 개발자
 
@@ -129,7 +129,7 @@ chip-tool doorlock subscribe lock-state <min-interval> <max-interval> <node_id> 
 
 ---
 
-## 2. Custom Control Cluster (0x131BFC00) — 퇴실/팩토리 리셋
+## 2. Custom Control Cluster (0x131BFC00) — 퇴실/팩토리 리셋/헬스체크
 
 커스텀 클러스터. Attribute Write로 동작을 트리거합니다.
 
@@ -138,6 +138,7 @@ chip-tool doorlock subscribe lock-state <min-interval> <max-interval> <node_id> 
 | factory_reset | `0x00000000` | uint16 | `0xDEAD`(57005) 쓰기 → 팩토리 리셋 |
 | exit_open | `0x00000001` | uint8 | duration(3~30) 쓰기 → 퇴실 열림 |
 | ota_trigger | `0x00000002` | uint8 | `1` 쓰기 → HTTPS OTA 시작 |
+| health | `0x00000003` | uint32 | `1` 쓰기 → 헬스체크, 읽기 → 결과 반환 |
 
 ---
 
@@ -218,6 +219,51 @@ chip-tool any write-by-id 0x131BFC00 0 57005 <node_id> <endpoint_id>
 ```
 
 > 0xDEAD 이외의 값은 무시됩니다 (안전장치).
+
+---
+
+### 2-4. HEALTH (헬스체크)
+
+기기 상태를 한 번에 조회합니다. `1`을 쓰면 측정 후 결과를 같은 속성에 저장합니다.
+
+**Request — Attribute Write (트리거)**
+
+| 필드 | 값 |
+|------|-----|
+| cluster_id | `0x131BFC00` |
+| attribute_id | `0x00000003` |
+| value | `1` (uint32) |
+
+**Response — Attribute Read (결과)**
+
+```bash
+chip-tool any write-by-id 0x131BFC00 3 1 <node_id> <endpoint_id>
+chip-tool any read-by-id  0x131BFC00 3   <node_id> <endpoint_id>
+```
+
+반환값은 uint32 비트맵:
+
+| 비트 | 필드 | 설명 |
+|------|------|------|
+| `[1:0]` | result | `1`=정상, `2`=힙 부족(<20KB), `3`=WiFi 끊김 |
+| `[2]` | door | `1`=잠김, `0`=해제 |
+| `[3]` | wifi | `1`=연결됨, `0`=끊김 |
+| `[15:8]` | heap_kb | 잔여 힙 (KB) |
+| `[23:16]` | rssi+128 | WiFi RSSI + 128. 미연결=`0` (예: -62dBm → `66`) |
+
+**디코딩 예시 (Python)**
+
+```python
+val = read_result  # chip-tool로 읽은 uint32
+result  = val & 0x3
+locked  = (val >> 2) & 0x1
+wifi    = (val >> 3) & 0x1
+heap_kb = (val >> 8) & 0xFF
+rssi    = ((val >> 16) & 0xFF) - 128  # dBm, 미연결=-128
+```
+
+> [!NOTE]
+> 쓰기 직후 읽기가 이루어지면 측정이 완료되기 전일 수 있습니다. 100ms 이상 후 읽기를 권장합니다.
 
 ---
 
@@ -373,5 +419,6 @@ Endpoint 1
 └── Custom Control (0x131BFC00)
     ├── Attribute 0: factory_reset  → uint16, write 57005(0xDEAD) = 리셋
     ├── Attribute 1: exit_open      → uint8, write 3~30 = 퇴실 (초)
-    └── Attribute 2: ota_trigger    → uint8, write 1 = OTA 시작
+    ├── Attribute 2: ota_trigger    → uint8, write 1 = OTA 시작
+    └── Attribute 3: health         → uint32, write 1 = 헬스체크 트리거 / read = 결과 비트맵
 ```

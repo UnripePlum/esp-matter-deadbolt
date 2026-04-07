@@ -6,6 +6,8 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
 #include "nvs_flash.h"
 #include "esp_https_ota.h"
 #include "esp_http_client.h"
@@ -32,7 +34,10 @@ static const uint32_t CUSTOM_CLUSTER_CONTROL       = 0x131BFC00;
 static const uint32_t CUSTOM_ATTR_FACTORY_RESET    = 0x00000000;  // uint16, write 0xDEAD → 팩토리 리셋
 static const uint32_t CUSTOM_ATTR_EXIT_OPEN        = 0x00000001;  // uint8, write duration(3~30) → 퇴실
 static const uint32_t CUSTOM_ATTR_OTA_TRIGGER      = 0x00000002;  // uint8, write 1 → HTTPS OTA 시작
+static const uint32_t CUSTOM_ATTR_HEALTH           = 0x00000003;  // uint32, write 1 → 헬스체크, read → 결과
 static const uint16_t FACTORY_RESET_MAGIC          = 0xDEAD;
+
+static uint16_t s_door_endpoint_id = 1;
 
 // GitHub Releases latest 고정 URL — 버전 업 시 URL 변경 불필요
 #define OTA_FIRMWARE_URL \
@@ -40,7 +45,7 @@ static const uint16_t FACTORY_RESET_MAGIC          = 0xDEAD;
 
 static void ota_task(void *arg);  // forward declaration
 
-#define FIRMWARE_VERSION            "v1.1.0"
+#define FIRMWARE_VERSION            "v1.1.1"
 #define GITHUB_API_LATEST_URL       "https://api.github.com/repos/UnripePlum/esp-matter-deadbolt/releases/latest"
 #define AUTO_OTA_BOOT_DELAY_MS      (60UL * 1000UL)          // 부팅 후 첫 확인 전 대기
 #define AUTO_OTA_CHECK_INTERVAL_MS  (1UL * 3600UL * 1000UL)  // 1시간마다 재확인
@@ -143,6 +148,53 @@ static void ota_task(void *arg)
     } else {
         ESP_LOGE(TAG, "OTA 실패: %s", esp_err_to_name(err));
     }
+    vTaskDelete(NULL);
+}
+
+static void health_check_task(void *arg)
+{
+    // 힙
+    uint32_t heap_free = esp_get_free_heap_size();
+    uint32_t heap_kb   = heap_free / 1024;
+    if (heap_kb > 255) heap_kb = 255;
+
+    // 업타임
+    int64_t uptime_min = esp_timer_get_time() / 1000000LL / 60;
+
+    // WiFi RSSI
+    wifi_ap_record_t ap_info = {};
+    bool wifi_ok    = (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK);
+    int8_t rssi     = wifi_ok ? ap_info.rssi : -128;
+    uint8_t rssi_pk = (uint8_t)((int)rssi + 128);
+
+    // 도어 상태
+    bool locked = door_is_locked();
+
+    // 결과 코드: 1=정상 2=힙경고(<20KB) 3=WiFi끊김
+    uint8_t result = 1;
+    if (heap_kb < 20) result = 2;
+    if (!wifi_ok)     result = 3;
+
+    // uint32 팩킹
+    uint32_t health_val =
+        (uint32_t)(result & 0x3)            |
+        ((uint32_t)(locked ? 1 : 0) << 2)   |
+        ((uint32_t)(wifi_ok ? 1 : 0) << 3)  |
+        ((uint32_t)(heap_kb & 0xFF) << 8)   |
+        ((uint32_t)rssi_pk << 16);
+
+    ESP_LOGI(TAG, "[HEALTH] door=%s heap=%luKB uptime=%lldm wifi=%s rssi=%ddBm result=%d val=0x%08lX",
+             locked ? "LOCKED" : "UNLOCKED",
+             (unsigned long)heap_kb,
+             (long long)uptime_min,
+             wifi_ok ? "OK" : "DISCONNECTED",
+             (int)rssi,
+             result,
+             (unsigned long)health_val);
+
+    esp_matter_attr_val_t val = esp_matter_uint32(health_val);
+    attribute::update(s_door_endpoint_id, CUSTOM_CLUSTER_CONTROL, CUSTOM_ATTR_HEALTH, &val);
+
     vTaskDelete(NULL);
 }
 
@@ -301,6 +353,8 @@ static esp_err_t app_attribute_update_cb(
         } else if (attribute_id == CUSTOM_ATTR_OTA_TRIGGER && val->val.u8 == 1) {
             ESP_LOGI(TAG, "OTA 트리거 수신");
             xTaskCreate(ota_task, "ota_task", 8192, nullptr, 5, nullptr);
+        } else if (attribute_id == CUSTOM_ATTR_HEALTH && val->val.u32 == 1) {
+            xTaskCreate(health_check_task, "health_chk", 4096, nullptr, 3, nullptr);
         }
         return ESP_OK;
     }
@@ -408,7 +462,12 @@ static void add_custom_control_cluster(endpoint_t *ep)
     attribute::create(cluster, CUSTOM_ATTR_OTA_TRIGGER,
                       ATTRIBUTE_FLAG_WRITABLE, trigger_val);
 
-    ESP_LOGI(TAG, "커스텀 클러스터 등록 (0x%08lX): factory_reset(0), exit_open(1), ota_trigger(2)",
+    /* Health Check: uint32, write 1 → 측정 후 결과 저장, read → 마지막 결과 반환 */
+    esp_matter_attr_val_t health_val = esp_matter_uint32(0);
+    attribute::create(cluster, CUSTOM_ATTR_HEALTH,
+                      ATTRIBUTE_FLAG_WRITABLE, health_val);
+
+    ESP_LOGI(TAG, "커스텀 클러스터 등록 (0x%08lX): factory_reset(0), exit_open(1), ota_trigger(2), health(3)",
              (unsigned long)CUSTOM_CLUSTER_CONTROL);
 }
 
@@ -422,6 +481,7 @@ static void setup_matter_door_lock(node_t *node)
     endpoint_t *ep = endpoint::door_lock::create(node, &lock_config,
                                                   ENDPOINT_FLAG_NONE, NULL);
     uint16_t endpoint_id = endpoint::get_id(ep);
+    s_door_endpoint_id = endpoint_id;
     comm_set_endpoint_id(endpoint_id);
 
 
