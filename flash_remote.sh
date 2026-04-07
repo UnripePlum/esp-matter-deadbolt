@@ -35,7 +35,7 @@ for f in bootloader.bin partition-table.bin ota_data_initial.bin esp-matter-dead
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         echo "[ERROR] $f 파일이 없습니다."
         echo "GitHub 릴리즈에서 다운로드하세요:"
-        echo "  https://github.com/UnripePlum/esp-matter-deadbolt/releases"
+        echo "  https://github.com/muinlab/esp-matter-deadbolt/releases"
         exit 1
     fi
 done

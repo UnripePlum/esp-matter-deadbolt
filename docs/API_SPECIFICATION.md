@@ -389,7 +389,7 @@ WiFi 실패 지속 → 커미셔닝 윈도우 오픈 → BLE 광고 재개
 
 ### 버전 확인 방식
 
-- GitHub API: `GET https://api.github.com/repos/UnripePlum/esp-matter-deadbolt/releases/latest`
+- GitHub API: `GET https://api.github.com/repos/muinlab/esp-matter-deadbolt/releases/latest`
 - 응답의 `tag_name` (예: `v1.1.0`)을 현재 펌웨어 버전과 비교
 - 다르면 업데이트 대기 플래그 세팅
 

@@ -92,7 +92,7 @@ source ~/esp/esp-matter/export.sh
 ### Build & Flash
 
 ```bash
-git clone https://github.com/UnripePlum/esp-matter-deadbolt.git
+git clone https://github.com/muinlab/esp-matter-deadbolt.git
 cd esp-matter-deadbolt
 
 idf.py set-target esp32s3
