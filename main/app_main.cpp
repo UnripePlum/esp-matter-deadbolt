@@ -208,7 +208,7 @@ static void refresh_commissioning_led(void)
     auto & server = chip::Server::GetInstance();
     bool has_fabric = (server.GetFabricTable().FabricCount() > 0);
     bool window_open = server.GetCommissioningWindowManager().IsCommissioningWindowOpen();
-    status_led_set_commissioning((!has_fabric) || window_open);
+    status_led_set_commissioning(!has_fabric);
     ESP_LOGI(TAG, "LED 커미셔닝 상태: fabric=%d window=%d", has_fabric, window_open);
 }
 
@@ -226,6 +226,15 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
                 chip::DeviceLayer::InterfaceIpChangeType::kIpV4_Assigned) {
                 ESP_LOGI(TAG, "WiFi IP 할당됨 → Matter 연결");
                 comm_set_matter_connected(true);
+                // WiFi 연결 후 Fabric이 있으면 60초간 커미셔닝 윈도우 오픈 (추가 기기 등록)
+                if (chip::Server::GetInstance().GetFabricTable().FabricCount() > 0) {
+                    ESP_LOGI(TAG, "기존 Fabric 감지 → 커미셔닝 윈도우 180초 오픈 (추가 기기 등록 가능)");
+                    CHIP_ERROR err = chip::Server::GetInstance().GetCommissioningWindowManager()
+                        .OpenBasicCommissioningWindow(chip::System::Clock::Seconds16(180));
+                    if (err != CHIP_NO_ERROR) {
+                        ESP_LOGE(TAG, "커미셔닝 윈도우 오픈 실패: %" CHIP_ERROR_FORMAT, err.Format());
+                    }
+                }
             }
             break;
 
@@ -306,9 +315,9 @@ static void setup_matter_door_lock(node_t *node)
  *  BOOT 버튼 팩토리 리셋 (GPIO 0, 5초 길게 누르기)
  * ═══════════════════════════════════════════════════════════ */
 
-#define BOOT_BUTTON_GPIO     0
+#define BOOT_BUTTON_GPIO      0
 #define FACTORY_RESET_HOLD_MS 5000
-#define BOOT_POLL_MS         100
+#define BOOT_POLL_MS          100
 
 static void factory_reset_task(void *arg)
 {
