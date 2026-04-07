@@ -46,6 +46,7 @@ run_cmd() {
     /pair)             pair ;;
     /pair_wifi\ *)     eval "pair_wifi ${input#/pair_wifi }" ;;
     /pair_auto)        pair_auto ;;
+    /wifi_set)         wifi_set ;;
     /unpair)           unpair ;;
     /smoke)            smoke ;;
     /factory_reset)    factory_reset ;;
