@@ -14,7 +14,6 @@ sdkconfig.old
 
 # Credentials
 .wifi_credentials
-.deadbolt_api_test_env.sh
 
 # OMC state
 .omc/
