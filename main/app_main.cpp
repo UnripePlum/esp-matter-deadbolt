@@ -46,6 +46,8 @@ static void ota_task(void *arg)
         .url = OTA_FIRMWARE_URL,
         .timeout_ms = 60000,
         .max_redirection_count = 10,  // GitHub 리다이렉트 대응
+        .buffer_size     = 4096,      // GitHub 응답 헤더가 커서 기본 512B 부족
+        .buffer_size_tx  = 2048,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .keep_alive_enable = true,
     };
