@@ -40,6 +40,7 @@ run_cmd() {
     /exit_open)        exit_open ;;
     /exit_open\ *)     eval "exit_open ${input#/exit_open }" ;;
     /state|/status)    lock_state ;;
+    /health)           health ;;
     /ota)              ota_update ;;
     /ota\ *)           eval "ota_update ${input#/ota }" ;;
     /ota_stop)         ota_stop ;;

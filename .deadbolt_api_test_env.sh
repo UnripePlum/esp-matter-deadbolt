@@ -380,6 +380,52 @@ _ota_update_unused() {
   printf '완료 후 /ota_stop 으로 Provider를 종료하세요.\n'
 }
 
+health() {
+  printf 'Health Check (node=%s endpoint=%s) ...\n' "$NODE_ID" "$ENDPOINT_ID"
+
+  # 트리거
+  chip-tool any write-by-id 0x131BFC00 3 1 "$NODE_ID" "$ENDPOINT_ID" \
+    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_cmd || return 1
+
+  sleep 0.3
+
+  # 결과 읽기
+  local raw
+  raw="$(chip-tool any read-by-id 0x131BFC00 3 "$NODE_ID" "$ENDPOINT_ID" \
+    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_read)"
+  local rc=$?
+  [[ $rc -ne 0 ]] && return $rc
+
+  # uint32 비트맵 디코딩
+  local val=$(( raw ))
+  local result=$(( val & 0x3 ))
+  local door=$(( (val >> 2) & 0x1 ))
+  local wifi=$(( (val >> 3) & 0x1 ))
+  local heap_kb=$(( (val >> 8) & 0xFF ))
+  local rssi_raw=$(( (val >> 16) & 0xFF ))
+  local rssi=$(( rssi_raw - 128 ))
+
+  local result_str door_str wifi_str rssi_str
+  case "$result" in
+    0) result_str="미실행" ;;
+    1) result_str=$'\033[32mOK\033[0m' ;;
+    2) result_str=$'\033[33mWARN (힙 부족 <20KB)\033[0m' ;;
+    3) result_str=$'\033[31mWARN (WiFi 끊김)\033[0m' ;;
+    *) result_str="Unknown ($result)" ;;
+  esac
+  [[ $door -eq 1 ]] && door_str="Locked" || door_str="Unlocked"
+  [[ $wifi -eq 1 ]] && wifi_str="Connected" || wifi_str=$'\033[31mDisconnected\033[0m'
+  [[ $rssi_raw -eq 0 ]] && rssi_str="N/A" || rssi_str="${rssi} dBm"
+
+  printf '┌─ Health Result (raw=0x%08X) ─────────────\n' "$val"
+  printf '│  Result  : %b\n' "$result_str"
+  printf '│  Door    : %s\n' "$door_str"
+  printf '│  WiFi    : %b\n' "$wifi_str"
+  printf '│  Heap    : %s KB\n' "$heap_kb"
+  printf '│  RSSI    : %s\n' "$rssi_str"
+  printf '└──────────────────────────────────────────\n'
+}
+
 factory_reset() {
   printf '\033[31m=== 원격 팩토리 리셋 ===\033[0m\n'
   printf 'NVS 전체 삭제 + 재부팅됩니다. 계속하시겠습니까? (y/N): '
@@ -415,6 +461,7 @@ api_help() {
   /smoke                      스모크 테스트 (상태확인 → 잠금 → 확인 → 해제 → 확인)
 
 ── 관리 ───────────────────────────────────────────────────
+  /health                       헬스체크 (도어/힙/WiFi RSSI 한번에 조회)
   /factory_reset                원격 팩토리 리셋 (NVS 삭제 + 재부팅)
 
 ── OTA 업데이트 ───────────────────────────────────────────
