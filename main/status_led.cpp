@@ -19,6 +19,7 @@ static constexpr uint64_t kFeedbackDurationUs = 2000000;  // 2초
 static constexpr uint16_t kHueRed    = 0;
 static constexpr uint16_t kHueOrange = 30;
 static constexpr uint16_t kHueGreen  = 120;
+static constexpr uint16_t kHuePurple = 280;
 static constexpr uint16_t kHueBlue   = 240;
 static constexpr uint8_t  kSatColor  = 100;
 static constexpr uint8_t  kBrightness = 10;
@@ -33,6 +34,7 @@ enum class visual_state_t : uint8_t {
     OP_LOCKING,
     OP_UNLOCKING,
     OP_FAIL,
+    OTA,
 };
 
 enum class feedback_t : uint8_t {
@@ -47,6 +49,7 @@ static bool s_initialized = false;
 static bool s_system_ready = false;
 static bool s_commissioning_open = false;
 static bool s_door_locked = false;
+static bool s_ota_active = false;
 static feedback_t s_feedback = feedback_t::NONE;
 static uint64_t s_feedback_until_us = 0;
 static visual_state_t s_last_visual_state = visual_state_t::BOOTING;
@@ -83,6 +86,7 @@ static led_frame_t frame_for_state(visual_state_t state, uint64_t now_us)
     case visual_state_t::OP_LOCKING:     return { blink_phase_on(kFeedbackMs, now_us), kHueOrange, kSatColor, kBrightness };
     case visual_state_t::OP_UNLOCKING:   return { blink_phase_on(kFeedbackMs, now_us), kHueGreen, kSatColor, kBrightness };
     case visual_state_t::OP_FAIL:        return { blink_phase_on(kFeedbackMs, now_us), kHueRed, kSatColor, kBrightness };
+    case visual_state_t::OTA:            return { blink_phase_on(kSlowBlinkMs, now_us), kHuePurple, kSatColor, kBrightness };
     default: return { false, 0, 0, 0 };
     }
 }
@@ -93,10 +97,12 @@ static visual_state_t resolve_visual_state(uint64_t now_us)
     uint64_t feedback_until;
     bool system_ready, commissioning_open, door_locked;
 
+    bool ota_active;
     taskENTER_CRITICAL(&s_lock);
     system_ready = s_system_ready;
     commissioning_open = s_commissioning_open;
     door_locked = s_door_locked;
+    ota_active = s_ota_active;
     feedback = s_feedback;
     feedback_until = s_feedback_until_us;
     if (feedback != feedback_t::NONE && feedback_until != 0 && now_us >= feedback_until) {
@@ -113,6 +119,7 @@ static visual_state_t resolve_visual_state(uint64_t now_us)
     case feedback_t::NONE:      break;
     }
 
+    if (ota_active) return visual_state_t::OTA;
     if (!system_ready) return visual_state_t::BOOTING;
     if (commissioning_open) return visual_state_t::COMMISSIONING;
     return door_locked ? visual_state_t::READY_LOCKED : visual_state_t::READY_UNLOCKED;
@@ -190,6 +197,11 @@ void status_led_notify_op_fail(void)
     taskEXIT_CRITICAL(&s_lock);
 }
 
+void status_led_set_ota(bool active)
+{
+    taskENTER_CRITICAL(&s_lock); s_ota_active = active; taskEXIT_CRITICAL(&s_lock);
+}
+
 const char *status_led_get_state_str(void)
 {
     visual_state_t state;
@@ -202,6 +214,7 @@ const char *status_led_get_state_str(void)
     case visual_state_t::OP_LOCKING:     return "locking";
     case visual_state_t::OP_UNLOCKING:   return "unlocking";
     case visual_state_t::OP_FAIL:        return "fail";
+    case visual_state_t::OTA:            return "ota";
     default: return "unknown";
     }
 }

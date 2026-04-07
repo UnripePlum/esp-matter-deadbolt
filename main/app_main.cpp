@@ -40,7 +40,7 @@ static const uint16_t FACTORY_RESET_MAGIC          = 0xDEAD;
 static void ota_task(void *arg)
 {
     ESP_LOGI(TAG, "=== HTTPS OTA 시작: %s ===", OTA_FIRMWARE_URL);
-    status_led_notify_op_fail();  // 빨강 점멸로 OTA 진행 중 표시
+    status_led_set_ota(true);  // 보라 느린 점멸 — 다운로드 완료 or 재부팅까지 유지
 
     esp_http_client_config_t http_cfg = {
         .url = OTA_FIRMWARE_URL,
