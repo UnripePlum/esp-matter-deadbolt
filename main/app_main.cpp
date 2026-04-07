@@ -45,7 +45,7 @@ static uint16_t s_door_endpoint_id = 1;
 
 static void ota_task(void *arg);  // forward declaration
 
-#define FIRMWARE_VERSION            "v1.1.3"
+#define FIRMWARE_VERSION            "v1.1.4"
 #define GITHUB_API_LATEST_URL       "https://api.github.com/repos/UnripePlum/esp-matter-deadbolt/releases/latest"
 #define AUTO_OTA_BOOT_DELAY_MS      (15UL * 1000UL)          // 부팅 후 첫 확인 전 대기
 #define AUTO_OTA_CHECK_INTERVAL_MS  (1UL * 3600UL * 1000UL)  // 1시간마다 재확인
@@ -416,6 +416,16 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
                 chip::DeviceLayer::ConnectivityChange::kConnectivity_Lost) {
                 ESP_LOGW(TAG, "WiFi 연결 끊김 → Matter 비활성");
                 comm_set_matter_connected(false);
+            }
+            break;
+
+        case chip::DeviceLayer::DeviceEventType::kFabricRemoved:
+            refresh_commissioning_led();
+            if (chip::Server::GetInstance().GetFabricTable().FabricCount() == 0) {
+                ESP_LOGI(TAG, "모든 Fabric 제거됨 → 커미셔닝 윈도우 오픈 (600초)");
+                comm_set_matter_connected(false);
+                chip::Server::GetInstance().GetCommissioningWindowManager()
+                    .OpenBasicCommissioningWindow(chip::System::Clock::Seconds16(600));
             }
             break;
 
