@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PATH="$HOME/esp/esp-matter/connectedhomeip/connectedhomeip/out/host:$PATH"
+export PATH="$HOME/esp/esp-matter/connectedhomeip/connectedhomeip/.environment/gn_out:$PATH"
 
 COMMISSIONER_NAME="${COMMISSIONER_NAME:-alpha}"
 NODE_ID="${NODE_ID:-1}"
@@ -289,13 +289,19 @@ unpair() {
     --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_pair
 }
 
-# ── OTA Update ──────────────────────────────────────────────
-
-OTA_PROVIDER_PID=""
-OTA_PROVIDER_NODE=2
-MATTER_SDK="$HOME/esp/esp-matter/connectedhomeip/connectedhomeip"
+# ── OTA Update (HTTPS — GitHub Releases latest) ─────────────
 
 ota_update() {
+  printf 'OTA 트리거 → node=%s endpoint=%s\n' "$NODE_ID" "$ENDPOINT_ID"
+  printf 'GitHub Releases latest 바이너리를 기기가 직접 다운로드합니다.\n'
+  chip-tool any write-by-id 0x131BFC00 2 1 "$NODE_ID" "$ENDPOINT_ID" \
+    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_cmd
+  printf '기기 시리얼 로그에서 진행 상황을 확인하세요.\n'
+  printf '완료 후 기기가 자동 재부팅됩니다.\n'
+}
+
+# ── 사용되지 않는 구 OTA Provider 코드 (아래는 참고용 stub) ──
+_ota_update_unused() {
   local bin_path="${1:-$PROJECT_DIR/build/esp-matter-deadbolt.bin}"
   local version="${2:-2}"
 
@@ -389,17 +395,7 @@ factory_reset() {
 }
 
 ota_stop() {
-  if [[ -n "$OTA_PROVIDER_PID" ]] && kill -0 "$OTA_PROVIDER_PID" 2>/dev/null; then
-    kill "$OTA_PROVIDER_PID" 2>/dev/null
-    wait "$OTA_PROVIDER_PID" 2>/dev/null
-    printf 'OTA Provider 종료 (PID=%s)\n' "$OTA_PROVIDER_PID"
-    OTA_PROVIDER_PID=""
-  else
-    printf 'OTA Provider가 실행 중이 아닙니다.\n'
-  fi
-  # Provider 커미셔닝 해제
-  chip-tool pairing unpair "$OTA_PROVIDER_NODE" \
-    --commissioner-name "$COMMISSIONER_NAME" 2>&1 | _filter_pair
+  printf 'HTTPS OTA는 진행 중 취소할 수 없습니다. 기기를 재부팅하세요.\n'
 }
 
 # ── Help ────────────────────────────────────────────────────
@@ -422,8 +418,8 @@ api_help() {
   /factory_reset                원격 팩토리 리셋 (NVS 삭제 + 재부팅)
 
 ── OTA 업데이트 ───────────────────────────────────────────
-  /ota [bin] [ver]            원격 펌웨어 업데이트 (기본: build/esp-matter-deadbolt.bin, v2)
-  /ota_stop                   OTA Provider 종료
+  /ota                        HTTPS OTA 시작 (GitHub Releases latest 자동 다운로드)
+  /ota_stop                   (취소 불가 — 재부팅으로만 중단 가능)
 
 ── 커미셔닝 ───────────────────────────────────────────────
   /pair [pin]                 온네트워크 커미셔닝 (기본 pin: 20202021)
