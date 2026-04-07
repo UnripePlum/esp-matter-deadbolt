@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "esp_https_ota.h"
+#include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -36,6 +37,86 @@ static const uint16_t FACTORY_RESET_MAGIC          = 0xDEAD;
 // GitHub Releases latest 고정 URL — 버전 업 시 URL 변경 불필요
 #define OTA_FIRMWARE_URL \
     "https://github.com/UnripePlum/esp-matter-deadbolt/releases/latest/download/esp-matter-deadbolt.bin"
+
+static void ota_task(void *arg);  // forward declaration
+
+#define FIRMWARE_VERSION            "v1.0.0"
+#define GITHUB_API_LATEST_URL       "https://api.github.com/repos/UnripePlum/esp-matter-deadbolt/releases/latest"
+#define AUTO_OTA_BOOT_DELAY_MS      (60UL * 1000UL)          // 부팅 후 첫 확인 전 대기
+#define AUTO_OTA_CHECK_INTERVAL_MS  (6UL * 3600UL * 1000UL)  // 6시간마다 재확인
+
+static bool s_ota_pending = false;
+
+/* GitHub API에서 최신 릴리즈 tag_name 추출 */
+static bool fetch_latest_version(char *out, size_t max_len)
+{
+    esp_http_client_config_t cfg = {
+        .url            = GITHUB_API_LATEST_URL,
+        .timeout_ms     = 10000,
+        .buffer_size    = 4096,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    esp_http_client_set_header(client, "User-Agent", "esp-matter-deadbolt");
+    esp_http_client_set_header(client, "Accept",     "application/vnd.github+json");
+
+    bool found = false;
+    if (esp_http_client_open(client, 0) == ESP_OK) {
+        esp_http_client_fetch_headers(client);
+        char buf[2048] = {};
+        int  len = esp_http_client_read(client, buf, sizeof(buf) - 1);
+        if (len > 0) {
+            const char *key = "\"tag_name\":\"";
+            char *p = strstr(buf, key);
+            if (p) {
+                p += strlen(key);
+                size_t i = 0;
+                while (*p && *p != '"' && i < max_len - 1) out[i++] = *p++;
+                out[i] = '\0';
+                found = (i > 0);
+            }
+        }
+    }
+    esp_http_client_cleanup(client);
+    return found;
+}
+
+static void auto_ota_task(void *arg)
+{
+    vTaskDelay(pdMS_TO_TICKS(AUTO_OTA_BOOT_DELAY_MS));  // Matter 안정화 대기
+
+    while (true) {
+        if (!is_matter_connected()) {
+            vTaskDelay(pdMS_TO_TICKS(30000));
+            continue;
+        }
+
+        char latest[32] = {};
+        if (fetch_latest_version(latest, sizeof(latest))) {
+            ESP_LOGI(TAG, "[AutoOTA] 현재=%s 최신=%s", FIRMWARE_VERSION, latest);
+            if (strcmp(latest, FIRMWARE_VERSION) != 0) {
+                ESP_LOGI(TAG, "[AutoOTA] 새 버전 감지 → 도어 잠김 대기");
+                s_ota_pending = true;
+            }
+        } else {
+            ESP_LOGW(TAG, "[AutoOTA] 버전 확인 실패 — 다음 주기에 재시도");
+        }
+
+        /* 새 버전이 있으면 도어 잠길 때까지 5초 간격으로 폴링 */
+        if (s_ota_pending) {
+            while (!door_is_locked()) {
+                vTaskDelay(pdMS_TO_TICKS(5000));
+            }
+            ESP_LOGI(TAG, "[AutoOTA] 도어 잠김 확인 → 자동 OTA 시작");
+            s_ota_pending = false;
+            xTaskCreate(ota_task, "ota_task", 8192, nullptr, 5, nullptr);
+            vTaskDelete(NULL);
+            return;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(AUTO_OTA_CHECK_INTERVAL_MS));
+    }
+}
 
 static void ota_task(void *arg)
 {
@@ -463,6 +544,9 @@ extern "C" void app_main(void)
 
     // 9. BOOT 버튼 팩토리 리셋 태스크
     xTaskCreate(factory_reset_task, "factory_rst", 4096, NULL, 3, NULL);
+
+    // 10. 자동 OTA 버전 체크 태스크 (60초 후 시작, 6시간 주기)
+    xTaskCreate(auto_ota_task, "auto_ota", 8192, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "=== Matter Door Lock 시작 완료 ===");
     ESP_LOGI(TAG, "  Primary:  WiFi over Matter (Door Lock Cluster)");

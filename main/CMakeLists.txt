@@ -11,6 +11,7 @@ set(PRIV_REQUIRES_LIST
     device
     led_driver
     esp_https_ota
+    esp_http_client
     app_update
 )
 
