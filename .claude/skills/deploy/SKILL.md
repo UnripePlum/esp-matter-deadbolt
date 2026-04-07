@@ -32,14 +32,17 @@ grep 'FIRMWARE_VERSION' main/app_main.cpp
 
 현재 버전을 메모해둔다 (예: `v1.1.0`).
 
-### 3. 버전 올릴지 확인
+### 3. 버전 업데이트 (필수)
 
-사용자에게 묻는다:
-- "버전을 올릴까요? 현재: {CURRENT_VERSION}"
-- YES → 사용자에게 새 버전 입력 받기 (예: v1.2.0)
-  - `main/app_main.cpp`의 `FIRMWARE_VERSION` 업데이트
-  - `docs/API_SPECIFICATION.md`의 버전/날짜 업데이트
-- NO → 현재 버전 유지
+**버전 업데이트는 배포 시 항상 필수다.** 버전이 같으면 자동 OTA가 업데이트를 감지하지 못한다.
+
+사용자에게 새 버전을 입력받는다:
+- "현재 버전: {CURRENT_VERSION} — 새 버전을 입력하세요 (예: v1.2.0)"
+- 입력 없이 건너뛰려 하면 반드시 경고: "버전을 올리지 않으면 기기가 자동 OTA로 업데이트를 감지할 수 없습니다."
+
+버전 결정 후:
+- `main/app_main.cpp`의 `FIRMWARE_VERSION` 업데이트
+- `docs/API_SPECIFICATION.md`의 버전/날짜 업데이트
 
 ### 4. 빌드
 
